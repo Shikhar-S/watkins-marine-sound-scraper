@@ -1,81 +1,91 @@
 # script to pull all data from the WHOI website
 
-# Import required modules
 import requests
 from bs4 import BeautifulSoup
 import pandas as pd
-import urllib, os, sys
-
+import os
+import sys
 
 def downloadTable(url, name, year):
-    # Scrape the HTML at the url
+    # Scrape the HTML at the given URL
     r = requests.get(url)
     
     # Turn the HTML into a Beautiful Soup object
     soup = BeautifulSoup(r.text, 'lxml')
     
-    # Create four variables to score the scraped data in
-    location = []
-    date = []
-    
-    # Create an object of the first object that is class=database
+    # Find the first table with class="database"
     table = soup.find(class_='database')
-    
-    wavfile = urllib.URLopener()
+    if not table:
+        return  # Safety check: if not found, exit
 
-    # Find all the <tr> tag pairs, skip the first one, then for each.
+    # Loop over rows in the table, skipping the header row
     for row in table.find_all('tr')[1:]:
-        # Create a variable of all the <td> tag pairs in each <tr> tag pair,
+        # Find all <a> tags with href
         col = row.find_all('a', href=True)
-    
+        if not col:
+            continue
+        
         flname = col[0]['href']
-        flnames = col[0]['href'].split('/' )
-    
-        dir = name + '/' + year
-    
-        if not os.path.exists(dir):
-            os.makedirs(dir)
-    
+        flnames = flname.split('/')
+        
+        # Create a directory for this species and year if it doesn't exist
+        directory = os.path.join(name, year)
+        if not os.path.exists(directory):
+            os.makedirs(directory)
+        
+        # Print a small progress indicator
         sys.stdout.write('-')
         sys.stdout.flush()
-        wavfile.retrieve( 'http://cis.whoi.edu/' + flname , dir + '/' + flnames[5] )
+        
+        # Build full URL and local filename
+        full_url = 'http://cis.whoi.edu/' + flname
+        local_filename = os.path.join(directory, flnames[-1])
+        
+        # Download the file with requests
+        resp_file = requests.get(full_url)
+        with open(local_filename, 'wb') as f:
+            f.write(resp_file.content)
 
-    print '->'
 
 def downloadAllAnimals(url):
+    # Get the main page listing species
     r = requests.get(url)
-
     soup = BeautifulSoup(r.text, 'lxml')
 
-    # Loop over species
-    list = soup.find(class_='large-4 medium-4 columns left')
-
-    for species in list.find_all('option')[1:]:
+    # Loop over species in the dropdown
+    species_list = soup.find(class_='large-4 medium-4 columns left')
+    if not species_list:
+        return
+    
+    for species in species_list.find_all('option')[1:]:
         url_end = species['value']
         name = species.string.strip()
         
-        print "Downloading " + name
+        print("Downloading " + name)
         
+        # Clean up the name so it's filesystem-friendly
         name = name.replace(' ', '')
         name = name.replace('-', '_')
         name = name.replace(',', '_')
 
-        # Loop over years
-        ryears = requests.get("http://cis.whoi.edu/science/B/whalesounds/" + url_end)
-
-        soupYears = BeautifulSoup(ryears.text, 'lxml')
- 
-        listYears = soupYears.find(class_='large-4 medium-4 columns')
-
-        for years in listYears.find_all('option')[1:]:
-            urlFin = years['value']
-            year = years.string.strip()
+        # Go to the page for this species to get a list of years
+        r_years = requests.get("http://cis.whoi.edu/science/B/whalesounds/" + url_end)
+        soup_years = BeautifulSoup(r_years.text, 'lxml')
+        
+        list_years = soup_years.find(class_='large-4 medium-4 columns')
+        if not list_years:
+            continue
+        
+        for year_option in list_years.find_all('option')[1:]:
+            url_fin = year_option['value']
+            year = year_option.string.strip()
             
-            print "         " + "\t" + year
+            print("         \t" + year)
+            
+            # Download all files for this species/year
+            downloadTable("http://cis.whoi.edu/science/B/whalesounds/" + url_fin, name, year)
 
-            downloadTable("http://cis.whoi.edu/science/B/whalesounds/" + urlFin, name, year)
-
-
-url = 'http://cis.whoi.edu/science/B/whalesounds/fullCuts.cfm'
-downloadAllAnimals(url)
-
+# Entry point
+if __name__ == "__main__":
+    url = 'http://cis.whoi.edu/science/B/whalesounds/fullCuts.cfm'
+    downloadAllAnimals(url)
